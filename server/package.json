@@ -1,0 +1,14 @@
+{
+  "name": "delta-pad-server",
+  "version": "1.0.0",
+  "description": "Servidor local para consulta de envios PAD no TCE-RS",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "cors": "^2.8.5"
+  }
+}

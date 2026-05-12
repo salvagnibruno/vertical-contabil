@@ -1,0 +1,7 @@
+name = "delta-pad-api"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Força processamento nos nós brasileiros da Cloudflare (GRU - São Paulo)
+[placement]
+mode = "smart"

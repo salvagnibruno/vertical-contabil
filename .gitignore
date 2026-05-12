@@ -1,0 +1,11 @@
+.vercel
+.claude
+node_modules
+entregas_contabeis
+server/node_modules
+*.bat
+*.py
+generate_excel*.py
+consolidate_data*.py
+inspect_data.py
+fetch_images.py

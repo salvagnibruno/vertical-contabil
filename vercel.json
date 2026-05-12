@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server/server.js",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "index.html",
+          "index_dashboard.html",
+          "index_colaborador.html",
+          "dashboard_style.css",
+          "dashboard_app.js",
+          "style.css",
+          "script.js",
+          "criteria.js",
+          "logo_delta.png",
+          "media_logo.png",
+          "betha_img.png",
+          "team_photos/**"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/server/server.js" },
+    { "src": "/(.*\\.(html|css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$)", "dest": "/$1" },
+    { "src": "/(.*)", "dest": "/server/server.js" }
+  ]
+}
