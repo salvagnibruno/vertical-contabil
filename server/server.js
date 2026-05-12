@@ -24,9 +24,9 @@ const TCERS_TIMEOUT = 28000; // 28s — dentro do limite de 30s do Vercel Hobby
 
 app.use(cors());
 
-// Arquivo principal do dashboard (index.html)
+// Dashboard principal
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../index.html'));
+    res.sendFile(path.join(__dirname, '../index_dashboard.html'));
 });
 
 // Portal do Colaborador
