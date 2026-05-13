@@ -164,7 +164,8 @@ function parsePadStatus(html, orgao, ano, mes) {
     const receiptLinks = [];
     const reReceipt = /imprimir-recibo\/(\d+)/g;
     let sentDateStr = null;
-    
+    let rowFound = false;
+
     if (!mes) {
         let match;
         while ((match = reReceipt.exec(padSection)) !== null) {
@@ -172,41 +173,35 @@ function parsePadStatus(html, orgao, ano, mes) {
         }
     } else {
         const rows = padSection.split(/<tr[^>]*>/i);
-        const monthStrEncoded = `${mes}&ordm; m&ecirc;s/${ano}`;
-        const monthStrPlain = `${mes}º mês/${ano}`;
-        
+        // Regex anchored to <td> prevents mes=1 from falsely matching "11º mês/2026"
+        const reMes = new RegExp(`<td>\\s*${mes}(?:&ordm;|[º°])\\s*m(?:&ecirc;|ê)s\\/${ano}`, 'i');
+
         rows.forEach(row => {
-            if (row.includes(monthStrEncoded) || row.includes(monthStrPlain)) {
+            if (reMes.test(row)) {
+                rowFound = true;
                 const subMatch = row.match(/imprimir-recibo\/(\d+)/);
-                if (subMatch) {
-                    receiptLinks.push(subMatch[1]);
-                    // Extract Date: typically the 3rd <td>
-                    const cols = row.split(/<td[^>]*>/i);
-                    if (cols.length >= 4) {
-                        const dateText = cols[3].split('</td>')[0].trim();
-                        if (dateText.match(/\d{2}\/\d{2}\/\d{4}/)) {
-                            sentDateStr = dateText;
-                        }
-                    }
+                if (subMatch) receiptLinks.push(subMatch[1]);
+                // Extract Data de Conclusão (3rd data column = cols[3])
+                const cols = row.split(/<td[^>]*>/i);
+                if (cols.length >= 4) {
+                    const dateMatch = cols[3].split('</td>')[0].trim().match(/\d{2}\/\d{2}\/\d{4}/);
+                    if (dateMatch) sentDateStr = dateMatch[0];
                 }
             }
         });
     }
 
-    let status = receiptLinks.length > 0 ? 'on-time' : 'pending';
+    // Linha encontrada = PAD enviado; sem linha = pendente
+    let status = (rowFound || receiptLinks.length > 0) ? 'on-time' : 'pending';
 
-    // If sent, check if it was late
+    // Só marca como atrasado se Data de Conclusão existir E for posterior ao prazo
     if (status === 'on-time' && sentDateStr && mes) {
         const lastDayOfMonth = new Date(parseInt(ano), parseInt(mes), 0);
         const deadline = new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate() + 30);
-        
         const [day, month, rest] = sentDateStr.split('/');
         const year = rest.split(' ')[0];
         const sentDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        
-        if (sentDate > deadline) {
-            status = 'late';
-        }
+        if (sentDate > deadline) status = 'late';
     }
 
     return {
