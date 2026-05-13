@@ -60,6 +60,13 @@ app.get('/api/pad-status', async (req, res) => {
         return res.json(cache[cacheKey]);
     } */
 
+    // Busca prazo oficial TCE-RS; cai na fórmula se indisponível
+    let deadline = null;
+    if (mes) {
+        try { deadline = await fetchDeadlineFromAgendaTCERS(parseInt(ano), parseInt(mes)); } catch (e) {}
+        if (!deadline) deadline = computeDeadlineFormula(parseInt(ano), parseInt(mes));
+    }
+
     try {
         const url = `https://portal.tce.rs.gov.br/pcdi2/relatorios-recibos-envio.action?&cdOrgao=${orgao}&ano=${ano}`;
         const response = await fetch(url, { headers: TCERS_HEADERS, timeout: TCERS_TIMEOUT });
@@ -69,7 +76,7 @@ app.get('/api/pad-status', async (req, res) => {
         }
 
         const html = await response.text();
-        const result = parsePadStatus(html, orgao, ano, mes ? parseInt(mes) : null);
+        const result = parsePadStatus(html, orgao, ano, mes ? parseInt(mes) : null, deadline);
 
         // Cache por 30 minutos
         cache[cacheKey] = result;
@@ -94,6 +101,13 @@ app.post('/api/pad-status-batch', async (req, res) => {
         return res.status(400).json({ error: 'Parâmetros orgaos[] e ano são obrigatórios.' });
     }
 
+    // Busca prazo uma única vez para todos os clientes do lote
+    let deadline = null;
+    if (mes) {
+        try { deadline = await fetchDeadlineFromAgendaTCERS(parseInt(ano), parseInt(mes)); } catch (e) {}
+        if (!deadline) deadline = computeDeadlineFormula(parseInt(ano), parseInt(mes));
+    }
+
     const results = {};
 
     // Processar em paralelo com limite de concorrência (máx 40 simultâneos)
@@ -116,16 +130,16 @@ app.post('/api/pad-status-batch', async (req, res) => {
                 const response = await fetch(url, { headers: TCERS_HEADERS, timeout: TCERS_TIMEOUT });
 
                 if (!response.ok) {
-                    results[orgao] = { orgao, status: 'pending' }; // Assume pending on fetch error for resilience
+                    results[orgao] = { orgao, status: 'pending' };
                     return;
                 }
 
                 const html = await response.text();
-                const parsed = parsePadStatus(html, orgao, ano, mes ? parseInt(mes) : null);
-                
+                const parsed = parsePadStatus(html, orgao, ano, mes ? parseInt(mes) : null, deadline);
+
                 cache[cacheKey] = parsed;
                 setTimeout(() => delete cache[cacheKey], 30 * 60 * 1000);
-                
+
                 results[orgao] = parsed;
             } catch (err) {
                 results[orgao] = { orgao, status: 'pending' };
@@ -147,7 +161,7 @@ app.post('/api/pad-status-batch', async (req, res) => {
  * Os recibos contêm o período no link ou texto. Verificamos se o mês/ano
  * corresponde ao solicitado.
  */
-function parsePadStatus(html, orgao, ano, mes) {
+function parsePadStatus(html, orgao, ano, mes, officialDeadline = null) {
     // Definitive Isolation of the first PAD section only
     const startIdx = html.indexOf('Sistema Informatizado de Auditoria e Prestação de Contas');
     const endIdx = html.indexOf('Informações Complementares');
@@ -196,8 +210,7 @@ function parsePadStatus(html, orgao, ano, mes) {
 
     // Só marca como atrasado se Data de Conclusão existir E for posterior ao prazo
     if (status === 'on-time' && sentDateStr && mes) {
-        const lastDayOfMonth = new Date(parseInt(ano), parseInt(mes), 0);
-        const deadline = new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate() + 30);
+        const deadline = officialDeadline || computeDeadlineFormula(parseInt(ano), parseInt(mes));
         const [day, month, rest] = sentDateStr.split('/');
         const year = rest.split(' ')[0];
         const sentDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
