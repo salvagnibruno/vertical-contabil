@@ -1146,17 +1146,21 @@ function refreshSimulated() {
 }
 
 function getSimulatedStatus(code, deadline, today) {
-    // Current rule: if no start date, internal default 01/01/1950 (already active)
-    
-    // February 2026: exact known data
+    // February 2026: dados reais confirmados via TCE-RS (106 on-time / 3 late / 1 pending)
     if (state.selectedYear === 2026 && state.selectedMonth === 1) {
-        if (code === '45700') return 'pending'; // PM Constantina
-        if (code === '41201') return 'late';    // CM Arroio do Tigre
+        if (code === '45700') return 'pending';                          // PM Constantina
+        if (code === '52201' || code === '41200' || code === '41201') return 'late'; // CM Miraguaí, PM/CM Arroio do Tigre
         return 'on-time';
     }
-    // Meses Futuros (prazo não vencido): Mostrar 'pendente' apenas de ABRIL em diante
-    if (deadline > today && state.selectedMonth > 2) return 'pending';
-    // Past months: deterministic hash
+    // March 2026: dados reais confirmados via TCE-RS (108 on-time / 1 late / 1 pending)
+    if (state.selectedYear === 2026 && state.selectedMonth === 2) {
+        if (code === '45700') return 'pending'; // PM Constantina
+        if (code === '51001') return 'late';    // CM Jaguari
+        return 'on-time';
+    }
+    // Qualquer mês com prazo ainda não vencido → pendente (sem adivinhar)
+    if (deadline > today) return 'pending';
+    // Meses passados sem dados conhecidos: hash determinístico
     const seed = seededHash(code + state.selectedMonth + state.selectedYear);
     return (seed > 0.35) ? 'on-time' : (seed > 0.12) ? 'late' : 'pending';
 }
@@ -2490,6 +2494,204 @@ function checkNotificationPermission() {
 
 init();
 
+// =========================================================
+// AUTH — Login Guard & Session
+// =========================================================
+
+function hashPassword(email, password) {
+    return btoa(unescape(encodeURIComponent(email.toLowerCase().trim() + ':' + password)));
+}
+
+function getAuthUsers() {
+    return JSON.parse(localStorage.getItem('delta_auth_users') || '[]');
+}
+
+function saveAuthUsers(users) {
+    localStorage.setItem('delta_auth_users', JSON.stringify(users));
+}
+
+function seedAdminIfNeeded() {
+    const users = getAuthUsers();
+    if (users.length === 0) {
+        saveAuthUsers([{
+            id: 'u_admin',
+            email: 'bruno.ramos@deltainf.com.br',
+            passwordHash: hashPassword('bruno.ramos@deltainf.com.br', '123'),
+            role: 'admin',
+            name: 'Bruno Ramos',
+            mustChangePassword: true,
+            createdAt: new Date().toISOString()
+        }]);
+    }
+}
+
+function getCurrentSession() {
+    const raw = sessionStorage.getItem('delta_session');
+    return raw ? JSON.parse(raw) : null;
+}
+
+function logoutUser() {
+    sessionStorage.removeItem('delta_session');
+    window.location.href = 'login.html';
+}
+
+function checkAuthGuard() {
+    seedAdminIfNeeded();
+    const session = getCurrentSession();
+    if (!session) {
+        window.location.href = 'login.html';
+        return false;
+    }
+    return true;
+}
+
+function applySessionToUI() {
+    const session = getCurrentSession();
+    if (!session) return;
+
+    // Update header name/role display
+    const nameEl = document.getElementById('header-user-name');
+    const roleEl = document.getElementById('header-user-role-label');
+    if (nameEl) nameEl.textContent = session.name;
+    if (roleEl) roleEl.textContent = session.role === 'admin' ? 'Administrador' : 'Colaborador';
+
+    const photoEl = document.getElementById('header-user-photo');
+    if (photoEl) {
+        photoEl.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(session.name)}&background=${session.role === 'admin' ? '003a70' : '009fe3'}&color=fff`;
+    }
+
+    // Role restrictions for colaborador
+    if (session.role !== 'admin') {
+        document.querySelectorAll('.admin-only-nav').forEach(el => {
+            el.style.display = 'none';
+        });
+        // Also hide the Equipe nav-group if all items hidden
+        const grp = document.getElementById('nav-group-equipe');
+        if (grp) grp.style.display = 'none';
+    }
+
+    // Override state.currentUser to match session name
+    const teamMember = state.team.find(m => m.name === session.name);
+    if (teamMember) {
+        state.currentUser = session.name;
+        state.isSupervisor = session.role === 'admin';
+    } else if (session.role === 'admin') {
+        state.isSupervisor = true;
+    }
+}
+
+// =========================================================
+// AUTH — User Management Modal
+// =========================================================
+
+function openUsersManagement() {
+    renderUsersList();
+    document.getElementById('modal-users-mgmt').classList.remove('hidden');
+}
+
+function renderUsersList() {
+    const container = document.getElementById('users-list-container');
+    if (!container) return;
+    const users = getAuthUsers();
+    if (users.length === 0) {
+        container.innerHTML = '<p style="color:#999; font-size:0.85rem;">Nenhum usuário cadastrado.</p>';
+        return;
+    }
+    container.innerHTML = users.map(u => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f0f0f0;">
+            <div>
+                <strong style="font-size:0.9rem;">${u.name}</strong>
+                <span style="font-size:0.75rem; color:#999; margin-left:8px;">${u.email}</span><br>
+                <span style="font-size:0.75rem; background:${u.role==='admin'?'#e8f0fe':'#f0faf4'}; color:${u.role==='admin'?'#1967d2':'#137333'}; padding:2px 8px; border-radius:10px;">${u.role === 'admin' ? 'Admin' : 'Colaborador'}</span>
+                ${u.mustChangePassword ? '<span style="font-size:0.7rem; color:#e67e22; margin-left:6px;">Troca de senha pendente</span>' : ''}
+            </div>
+            <button onclick="deleteAuthUser('${u.id}')" style="background:none; border:none; cursor:pointer; font-size:1rem; color:#e74c3c;" title="Remover usuário">🗑️</button>
+        </div>
+    `).join('');
+}
+
+window.deleteAuthUser = (userId) => {
+    const session = getCurrentSession();
+    if (session && session.userId === userId) {
+        alert('Você não pode excluir o usuário atualmente logado.');
+        return;
+    }
+    if (!confirm('Deseja excluir este usuário de acesso?')) return;
+    const users = getAuthUsers().filter(u => u.id !== userId);
+    saveAuthUsers(users);
+    renderUsersList();
+};
+
+// Form: Add new user
+document.getElementById('form-add-user')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = document.getElementById('new-user-name').value.trim();
+    const email = document.getElementById('new-user-email').value.trim().toLowerCase();
+    const password = document.getElementById('new-user-password').value;
+    const role = document.getElementById('new-user-role').value;
+
+    const users = getAuthUsers();
+    if (users.find(u => u.email.toLowerCase() === email)) {
+        alert('Já existe um usuário com este e-mail.');
+        return;
+    }
+
+    users.push({
+        id: 'u_' + Date.now(),
+        email,
+        passwordHash: hashPassword(email, password),
+        role,
+        name,
+        mustChangePassword: true,
+        createdAt: new Date().toISOString()
+    });
+    saveAuthUsers(users);
+    renderUsersList();
+    e.target.reset();
+    alert(`Usuário "${name}" criado com sucesso. Ele deverá trocar a senha no primeiro acesso.`);
+});
+
+// =========================================================
+// ENTREGAS LEGAIS
+// =========================================================
+
+function getClientExtras() {
+    return JSON.parse(localStorage.getItem('delta_client_extras') || '{}');
+}
+
+function saveClientExtras(extras) {
+    localStorage.setItem('delta_client_extras', JSON.stringify(extras));
+}
+
+function isEntregasLegaisActive(clientCode) {
+    const extras = getClientExtras();
+    const e = extras[clientCode];
+    if (!e || !e.entregasLegais) return false;
+    if (!e.contratoInicio || !e.contratoFim) return true; // marked but no dates = active
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(e.contratoInicio);
+    const end = new Date(e.contratoFim);
+    return today >= start && today <= end;
+}
+
+// =========================================================
+// ENTREGAS LEGAIS FILTER STATE
+// =========================================================
+
+let filterOnlyEntregasLegais = localStorage.getItem('delta_filter_entregas_legais') === 'true';
+
+function setupEntregasLegaisFilter() {
+    const cb = document.getElementById('filter-only-entregas-legais');
+    if (!cb) return;
+    cb.checked = filterOnlyEntregasLegais;
+    cb.addEventListener('change', () => {
+        filterOnlyEntregasLegais = cb.checked;
+        localStorage.setItem('delta_filter_entregas_legais', cb.checked);
+        refreshModuleData(false, true);
+    });
+}
+
 
 
 /**
@@ -2499,11 +2701,11 @@ function renderClientsMgmtTable() {
     const tbody = document.querySelector('#clients-mgmt-table tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    
+
     state.clients.forEach((c, idx) => {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td><strong>${c.code}</strong></td>
+            <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" data-original="${c.code}" style="width:80px; font-weight:bold;" title="Cód. Órgão — edite com atenção, afeta consultas de PAD e outros módulos"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
             <td><input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart"></td>
@@ -2515,13 +2717,39 @@ function renderClientsMgmtTable() {
 
 function saveClientsChanges() {
     const inputs = document.querySelectorAll('#clients-mgmt-table input');
+
+    // Detecta alterações no cód. órgão antes de qualquer modificação
+    const codeChanges = [];
+    inputs.forEach(input => {
+        if (input.dataset.field === 'code' && input.value.trim() !== input.dataset.original) {
+            const idx = parseInt(input.dataset.idx);
+            codeChanges.push({
+                name: state.clients[idx].name,
+                from: input.dataset.original,
+                to: input.value.trim()
+            });
+        }
+    });
+
+    if (codeChanges.length > 0) {
+        const lista = codeChanges.map(ch => `• ${ch.name}: ${ch.from} → ${ch.to}`).join('\n');
+        const confirmado = confirm(
+            `⚠️ Atenção: você está alterando o Cód. Órgão dos seguintes clientes:\n\n${lista}\n\n` +
+            `Isso afetará as consultas de PAD, SIOPE e demais módulos que usam este código.\n\n` +
+            `Confirma a alteração?`
+        );
+        if (!confirmado) return;
+    }
+
     inputs.forEach(input => {
         const idx = input.dataset.idx;
         const field = input.dataset.field;
         state.clients[idx][field] = input.value;
     });
-    
+
     localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
     alert('✅ Clientes salvos com sucesso!');
-    refreshModuleData();
+    renderClientsMgmtTable(); // Atualiza data-original para refletir os novos códigos salvos
+    // Se algum cód. órgão foi alterado, limpa o cache para evitar dados desatualizados
+    refreshModuleData(false, codeChanges.length > 0);
 }
